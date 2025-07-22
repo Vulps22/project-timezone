@@ -1,7 +1,8 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const database = require('./config/database');
-const EventHandler = require('./handlers/eventHandler');
+const CommandHandler = require('./handlers/commandHandler');
+const EventLoader = require('./handlers/eventLoader');
 const { clientProvider } = require('./services/clientProvider');
 
 class TimezoneBot {
@@ -15,7 +16,11 @@ class TimezoneBot {
             ]
         });
 
-        this.eventHandler = new EventHandler(this.client);
+        // Load commands
+        this.commandHandler = new CommandHandler(this.client);
+        
+        // Load events
+        this.eventLoader = new EventLoader(this.client);
     }
 
     async start() {
@@ -29,10 +34,7 @@ class TimezoneBot {
             // Connect to database (each shard shares the same SQLite file)
             await database.connect();
             
-            // Register event handlers
-            this.eventHandler.registerEvents();
-            
-            // Login to Discord
+            // Login to Discord - events will handle the rest
             await this.client.login(process.env.DISCORD_TOKEN);
             
         } catch (error) {
