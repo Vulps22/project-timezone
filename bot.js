@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const database = require('./config/database');
 const CommandHandler = require('./handlers/commandHandler');
 const EventLoader = require('./handlers/eventLoader');
+const dstService = require('./services/dstService');
 const { clientProvider } = require('./services/clientProvider');
 
 class TimezoneBot {
@@ -37,6 +38,14 @@ class TimezoneBot {
             // Login to Discord - events will handle the rest
             await this.client.login(process.env.DISCORD_TOKEN);
             
+            // Start DST monitoring service (only on shard 0 to avoid duplicates)
+            if (shardId === 0) {
+                setTimeout(() => {
+                    dstService.start();
+                    console.log(`🌍 DST monitoring started on shard ${shardId}`);
+                }, 10000); // Wait 10 seconds for bot to be fully ready
+            }
+            
         } catch (error) {
             console.error('❌ Failed to start bot shard:', error);
             process.exit(1);
@@ -47,6 +56,9 @@ class TimezoneBot {
         try {
             const shardId = this.client.shard?.ids[0] ?? 0;
             console.log(`🛑 Shutting down Timey Zoney shard ${shardId}...`);
+            
+            // Stop DST service
+            dstService.stop();
             
             // Close Discord client
             if (this.client) {
