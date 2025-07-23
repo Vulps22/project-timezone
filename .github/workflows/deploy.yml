@@ -1,0 +1,70 @@
+# .github/workflows/deploy.yml
+
+name: Build and Deploy to Production
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger this workflow when a tag like v1.0.0, v1.1.0 is pushed
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get version from git tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # IMPORTANT: Use your Docker Hub username here
+          tags: |
+            vulps23/project-timezone:${{ env.VERSION }}
+            vulps23/project-timezone:latest
+
+  deploy:
+    name: Deploy to Production Server
+    needs: build-and-push # This job runs only after the image is successfully built and pushed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from git tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /opt/discord-bots/project-timezone
+            
+            # Pull latest image
+            docker compose pull bot
+            
+            # Start the bot
+            docker compose up -d bot
