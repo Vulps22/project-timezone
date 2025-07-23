@@ -6,6 +6,8 @@
     "start": "node index.js",
     "dev": "node index.js",
     "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "single": "node bot.js"
   },
   "keywords": [],
@@ -20,5 +22,22 @@
   },
   "devDependencies": {
     "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "services/**/*.js",
+      "commands/**/*.js",
+      "!services/tests/**",
+      "!commands/tests/**",
+      "!**/node_modules/**"
+    ],
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "verbose": true,
+    "clearMocks": true,
+    "resetMocks": true,
+    "restoreMocks": true
   }
 }
