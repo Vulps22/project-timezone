@@ -8,10 +8,15 @@ class TimezoneService {
      */
     isValidTimezone(timezone) {
         try {
+            // Reject null/undefined/empty values
+            if (!timezone || typeof timezone !== 'string') {
+                return false;
+            }
+            
             // Try to create a DateTime in the specified timezone
-            DateTime.now().setZone(timezone);
+            const dt = DateTime.now().setZone(timezone);
             // Check if it's a valid zone
-            return DateTime.now().setZone(timezone).isValid;
+            return dt.isValid && dt.zoneName !== null;
         } catch (error) {
             return false;
         }
@@ -23,11 +28,11 @@ class TimezoneService {
      * @returns {string|null} UTC offset string (e.g., "UTC+5", "UTC-3") or null if invalid
      */
     getCurrentOffset(timezone) {
-        try {
-            if (!this.isValidTimezone(timezone)) {
-                return null;
-            }
+        if (!this.isValidTimezone(timezone)) {
+            throw new Error(`Invalid timezone: ${timezone}`);
+        }
 
+        try {
             const dt = DateTime.now().setZone(timezone);
             const offset = dt.offset; // Offset in minutes
             
@@ -46,7 +51,7 @@ class TimezoneService {
             }
         } catch (error) {
             console.error('Error getting current offset:', error);
-            return null;
+            throw error;
         }
     }
 
@@ -183,14 +188,16 @@ class TimezoneService {
         const common = this.getCommonTimezones();
         console.log(`📋 Common timezones loaded: ${common.length} items`);
         
-        if (!query || query.length < 2) {
+        // Trim the query and check if empty or too short
+        const trimmedQuery = query ? query.trim() : '';
+        if (!trimmedQuery || trimmedQuery.length < 2) {
             console.log(`⚡ Query too short, returning first 25 common timezones`);
             const result = common.slice(0, 25);
             console.log(`📤 Returning ${result.length} timezone options`);
             return result;
         }
         
-        const lowerQuery = query.toLowerCase();
+        const lowerQuery = trimmedQuery.toLowerCase();
         console.log(`🔎 Searching for: "${lowerQuery}"`);
         
         // Filter common timezones by name
