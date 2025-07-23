@@ -1,41 +1,15 @@
-version: '3.8'
 
 services:
-  timezone-bot:
-    build: .
-    container_name: timey-zoney-bot
+  bot:
+    image: vulps23/project-timezone:latest
+    container_name: timey-zoney-bot-container
     volumes:
       - timezone-data:/app/database
-    environment:
-      # Discord Bot Configuration
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
-      
-      # Logging Configuration (Optional)
-      - DISCORD_LOG_CHANNEL=${DISCORD_LOG_CHANNEL}
-      - DISCORD_ERROR_CHANNEL=${DISCORD_ERROR_CHANNEL}
-      - DISCORD_LOGGER_WEBHOOK=${DISCORD_LOGGER_WEBHOOK}
-      
-      # Environment
-      - NODE_ENV=${NODE_ENV:-production}
+    env_file:
+      - ./.env
     
     # Restart policy
     restart: unless-stopped
-    
-    # Health check (optional)
-    healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    
-    # Resource limits (optional)
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
 
 # Named volume for database persistence
 volumes:
