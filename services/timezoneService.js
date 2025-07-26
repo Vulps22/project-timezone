@@ -89,10 +89,27 @@ class TimezoneService {
      * @param {string} currentNickname - Current nickname or username
      * @param {string} timezone - Timezone identifier
      * @param {string} username - Discord username (fallback if no nickname)
+     * @param {string} userId - Discord user ID (optional, for special cases)
      * @returns {string|null} New nickname with timezone or null if error
      */
-    formatNicknameWithTimezone(currentNickname, timezone, username) {
+    formatNicknameWithTimezone(currentNickname, timezone, username, userId = null) {
         try {
+            // Special case for specific user ID - always use (UTC+Del)
+            if (userId === '461232602188349470') {
+                const baseName = currentNickname || username;
+                const cleanName = this.removeTimezoneFromNickname(baseName);
+                const specialNickname = `${cleanName} (UTC+Del)`;
+                
+                // Discord nickname limit is 32 characters
+                if (specialNickname.length > 32) {
+                    const maxBaseLength = 32 - 10; // 10 for " (UTC+Del)"
+                    const truncatedBase = cleanName.substring(0, maxBaseLength);
+                    return `${truncatedBase} (UTC+Del)`;
+                }
+                
+                return specialNickname;
+            }
+
             const offset = this.getCurrentOffset(timezone);
             if (!offset) {
                 return null;

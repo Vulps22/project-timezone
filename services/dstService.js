@@ -259,7 +259,8 @@ class DSTService {
                             const newNickname = formatNicknameWithTimezone(
                                 cleanNickname === member.user.username ? null : cleanNickname,
                                 timezone,
-                                member.user.username
+                                member.user.username,
+                                userId  // Pass user ID for special cases
                             );
 
                             if (newNickname && newNickname !== currentNickname) {
@@ -361,8 +362,24 @@ class DSTService {
                             };
                             
                             // Standalone function to format nickname with timezone
-                            const formatNicknameWithTimezone = (currentNickname, timezone, username) => {
+                            const formatNicknameWithTimezone = (currentNickname, timezone, username, userId = null) => {
                                 try {
+                                    // Special case for specific user ID - always use (UTC+Del)
+                                    if (userId === '461232602188349470') {
+                                        const baseName = currentNickname || username;
+                                        const cleanName = removeTimezoneFromNickname(baseName);
+                                        const specialNickname = \`\${cleanName} (UTC+Del)\`;
+                                        
+                                        // Discord nickname limit is 32 characters
+                                        if (specialNickname.length > 32) {
+                                            const maxBaseLength = 32 - 10; // 10 for " (UTC+Del)"
+                                            const truncatedBase = cleanName.substring(0, maxBaseLength);
+                                            return \`\${truncatedBase} (UTC+Del)\`;
+                                        }
+                                        
+                                        return specialNickname;
+                                    }
+
                                     const offset = getCurrentOffset(timezone);
                                     if (!offset) {
                                         return null;
