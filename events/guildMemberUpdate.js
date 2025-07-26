@@ -48,8 +48,7 @@ module.exports = {
                 const newNicknameWithTz = timezoneService.formatNicknameWithTimezone(
                     newMember.nickname,
                     userData.timezone_identifier,
-                    newMember.user.username,
-                    newMember.user.id  // Pass user ID for special cases
+                    newMember.user.username
                 );
                 
                 if (!newNicknameWithTz) {

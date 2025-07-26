@@ -138,8 +138,7 @@ module.exports = {
             const newNickname = timezoneService.formatNicknameWithTimezone(
                 member.nickname, 
                 timezone, 
-                interaction.user.username,
-                interaction.user.id  // Pass user ID for special cases
+                interaction.user.username
             );
 
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
