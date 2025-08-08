@@ -39,22 +39,22 @@ module.exports = {
     async autocomplete(interaction) {
         try {
             console.log(`🔍 Timezone autocomplete triggered by ${interaction.user.tag}`);
-            
+
             const focusedValue = interaction.options.getFocused();
             console.log(`📝 Focused value: "${focusedValue}" (length: ${focusedValue.length})`);
-            
+
             const choices = timezoneService.searchTimezones(focusedValue);
             console.log(`🎯 Found ${choices.length} timezone choices for query: "${focusedValue}"`);
-            
+
             if (choices.length > 0) {
                 console.log(`📋 First 3 choices:`, choices.slice(0, 3).map(c => c.name));
             }
-            
+
             const response = choices.map(choice => ({ name: choice.name, value: choice.value }));
-            
+            console.log(response);
             await interaction.respond(response);
             console.log(`✅ Autocomplete response sent with ${response.length} options`);
-            
+
         } catch (error) {
             console.error('❌ Autocomplete error:', error);
             console.error('📋 Error context:', {
@@ -62,7 +62,7 @@ module.exports = {
                 commandName: interaction.commandName,
                 focused: interaction.options?.getFocused() || 'N/A'
             });
-            
+
             // Try to send an empty response to prevent Discord errors
             try {
                 await interaction.respond([]);
@@ -76,7 +76,7 @@ module.exports = {
     async execute(interaction) {
 
         const subcommand = interaction.options.getSubcommand();
-        
+
         try {
             if (subcommand === 'set') {
                 await this.handleSetTimezone(interaction);
@@ -87,11 +87,11 @@ module.exports = {
             }
         } catch (error) {
             console.error('Error executing timezone command:', error);
-            
+
             // Check if we can still respond
             if (!interaction.replied && !interaction.deferred && interaction.isRepliable()) {
                 try {
-                    await interaction.reply({ 
+                    await interaction.reply({
                         content: '❌ An error occurred while processing your request.',
                         flags: [MessageFlags.Ephemeral]
                     });
@@ -99,7 +99,7 @@ module.exports = {
                     console.error('❌ Failed to send error reply:', replyError);
                 }
             }
-            
+
             // Log error
             await logger.error(`**Timezone Command Error** | **User:** <@${interaction.user.id}> | **Server:** \`${interaction.guildId}\` | **Error:** ${error.message}`);
         }
@@ -110,40 +110,40 @@ module.exports = {
         const timezone = interaction.options.getString('timezone');
         const userId = interaction.user.id;
         const serverId = interaction.guildId;
-        
+
         // Log command received
         await logger.logCommand('timezone set', userId, serverId, 'Received');
-        
+
         // Validate timezone
         if (!timezoneService.isValidTimezone(timezone)) {
             await interaction.reply({
                 content: '❌ Invalid timezone. Please use a valid timezone identifier like `America/New_York` or `Europe/London`.',
                 flags: ['Ephemeral']
             });
-            
+
             await logger.logCommand('timezone set', userId, serverId, 'Failed - Invalid timezone');
             return;
         }
-        
+
         try {
             // Get current offset
             const offset = timezoneService.getCurrentOffset(timezone);
-            
+
             // Save to database
             await databaseService.setUserTimezone(userId, timezone);
             await databaseService.addUserToServer(userId, serverId);
-            
+
             // Try to update nickname
             const member = interaction.member;
             const newNickname = timezoneService.formatNicknameWithTimezone(
-                member.nickname, 
-                timezone, 
+                member.nickname,
+                timezone,
                 interaction.user.username
             );
 
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
             const isServerOwner = interaction.guild.ownerId === interaction.user.id;
-            
+
             if (isServerOwner) {
                 const embed = new EmbedBuilder()
                     .setColor(0xFFAA00)
@@ -156,19 +156,19 @@ module.exports = {
                         { name: 'Suggested Nickname:', value: newNickname ? `\`${newNickname}\`` : 'Could not generate nickname', inline: false }
                     )
                     .setFooter({ text: 'Your timezone is saved and will work on other servers where you\'re not the owner.' });
-                
+
                 await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
-                
+
                 // Log timezone set with server owner limitation
                 await logger.logTimezoneSet(userId, serverId, timezone, offset);
                 await logger.logCommand('timezone set', userId, serverId, 'Success - Server owner limitation (Discord restriction)');
                 return;
             }
-            
+
             if (newNickname) {
                 try {
                     await member.setNickname(newNickname);
-                    
+
                     const embed = new EmbedBuilder()
                         .setColor(0x00FF00)
                         .setTitle('✅ Timezone Set Successfully')
@@ -178,13 +178,13 @@ module.exports = {
                             { name: 'Nickname Updated', value: `\`${newNickname}\``, inline: false }
                         )
                         .setFooter({ text: 'Your timezone will be updated automatically across all servers with this bot.' });
-                    
+
                     await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
-                    
+
                     // Log successful timezone set
                     await logger.logTimezoneSet(userId, serverId, timezone, offset);
                     await logger.logNicknameUpdate(userId, serverId, member.nickname || interaction.user.username, newNickname);
-                    
+
                 } catch (nicknameError) {
                     // Nickname update failed, but timezone was saved
                     const embed = new EmbedBuilder()
@@ -196,9 +196,9 @@ module.exports = {
                             { name: 'Issue', value: 'Could not update your nickname due to permission restrictions.', inline: false }
                         )
                         .setFooter({ text: 'Your timezone is saved and will work on servers where I can manage nicknames.' });
-                    
+
                     await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
-                    
+
                     // Log timezone set with permission error
                     await logger.logTimezoneSet(userId, serverId, timezone, offset);
                     await logger.logPermissionError(userId, serverId, 'update nickname');
@@ -214,22 +214,22 @@ module.exports = {
                         { name: 'Issue', value: 'Could not update your nickname. This may be due to permission restrictions or role hierarchy.', inline: false }
                     )
                     .setFooter({ text: 'Your timezone is saved and will work on servers where I can manage nicknames.' });
-                
+
                 await interaction.reply({ embeds: [embed], ephemeral: true });
-                
+
                 // Log timezone set with permission error
                 await logger.logTimezoneSet(userId, serverId, timezone, offset);
                 await logger.logPermissionError(userId, serverId, 'update nickname');
             }
-            
+
         } catch (dbError) {
             console.error('Database error setting timezone:', dbError);
-            
+
             await interaction.reply({
                 content: '❌ Failed to save your timezone. Please try again later.',
                 flags: ['Ephemeral']
             });
-            
+
             await logger.logCommand('timezone set', userId, serverId, `Failed - Database error: ${dbError.message}`);
         }
     },
@@ -237,35 +237,35 @@ module.exports = {
     async handleClearData(interaction) {
         const userId = interaction.user.id;
         const serverId = interaction.guildId;
-        
+
         // Log command received
         await logger.logCommand('timezone clear', userId, serverId, 'Received');
-        
+
         try {
             // Check if user has data
             const userData = await databaseService.getUserTimezone(userId);
-            
+
             if (!userData) {
                 await interaction.reply({
                     content: '❌ No timezone data found for your account.',
                     ephemeral: true
                 });
-                
+
                 await logger.logCommand('timezone clear', userId, serverId, 'Failed - No data found');
                 return;
             }
-            
+
             // Try to remove timezone from nickname first
             const member = interaction.member;
             const currentNickname = member.nickname || interaction.user.username;
             const cleanNickname = timezoneService.removeTimezoneFromNickname(currentNickname);
-            
+
             let nicknameCleared = false;
             let nicknameError = null;
-            
+
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
             const isServerOwner = interaction.guild.ownerId === interaction.user.id;
-            
+
             if (!isServerOwner && cleanNickname !== currentNickname) {
                 try {
                     // Only set nickname if it actually changed and it's not just the username
@@ -282,13 +282,13 @@ module.exports = {
                     nicknameError = error;
                 }
             }
-            
+
             // Delete user data
             await databaseService.deleteUser(userId);
-            
+
             // Create response embed
             let embed;
-            
+
             if (isServerOwner) {
                 embed = new EmbedBuilder()
                     .setColor(0xFFAA00)
@@ -329,30 +329,30 @@ module.exports = {
                     )
                     .setFooter({ text: 'This action cannot be undone.' });
             }
-            
+
             await interaction.reply({ embeds: [embed], ephemeral: true });
-            
+
             // Log successful data clearing
-            const logMessage = nicknameCleared 
+            const logMessage = nicknameCleared
                 ? `Success - Cleared data and nickname for timezone: ${userData.timezone_identifier}`
                 : `Success - Cleared data for timezone: ${userData.timezone_identifier} (nickname ${isServerOwner ? 'server owner limitation' : nicknameError ? 'permission error' : 'no change needed'})`;
-            
+
             await logger.logCommand('timezone clear', userId, serverId, logMessage);
-            
+
             if (nicknameCleared) {
                 await logger.logNicknameUpdate(userId, serverId, currentNickname, cleanNickname);
             } else if (nicknameError && !isServerOwner) {
                 await logger.logPermissionError(userId, serverId, 'clear timezone from nickname');
             }
-            
+
         } catch (dbError) {
             console.error('Database error clearing user:', dbError);
-            
+
             await interaction.reply({
                 content: '❌ Failed to clear your data. Please try again later.',
                 ephemeral: true
             });
-            
+
             await logger.logCommand('timezone clear', userId, serverId, `Failed - Database error: ${dbError.message}`);
         }
     },
@@ -361,39 +361,39 @@ module.exports = {
         const targetUser = interaction.options.getUser('user') || interaction.user;
         const userId = interaction.user.id;
         const serverId = interaction.guildId;
-        
+
         try {
             // Log command received
             await logger.logCommand('timezone time', userId, serverId, `Received - Target: ${targetUser.id}`);
-            
+
             // Get target user's timezone data
             const userData = await databaseService.getUserTimezone(targetUser.id);
-            
+
             if (!userData) {
                 const isOwnTime = targetUser.id === interaction.user.id;
-                const message = isOwnTime 
+                const message = isOwnTime
                     ? '❌ You haven\'t set your timezone yet! Use `/timezone set` to get started.'
                     : `❌ ${targetUser.username} hasn't set their timezone yet.`;
-                
+
                 await interaction.reply({ content: message, ephemeral: true });
-                
+
                 await logger.logCommand('timezone time', userId, serverId, `Failed - No timezone data for ${targetUser.id}`);
                 return;
             }
-            
+
             // Get current time information
             const timeInfo = timezoneService.getCurrentTime(userData.timezone_identifier);
-            
+
             if (!timeInfo) {
                 await interaction.reply({
                     content: '❌ Error retrieving time information. Please try again.',
                     ephemeral: true
                 });
-                
+
                 await logger.logCommand('timezone time', userId, serverId, `Failed - Invalid timezone: ${userData.timezone_identifier}`);
                 return;
             }
-            
+
             // Create embed with time information
             const embed = new EmbedBuilder()
                 .setColor(0x0099FF)
@@ -408,27 +408,27 @@ module.exports = {
                     { name: '🗓️ Month', value: timeInfo.monthName, inline: true },
                     { name: '📋 Full DateTime', value: timeInfo.formatted, inline: false }
                 )
-                .setFooter({ 
+                .setFooter({
                     text: `Timezone set ${this.getRelativeTime(userData.created_at)}`,
                 })
                 .setTimestamp();
-            
+
             await interaction.reply({ embeds: [embed], ephemeral: true });
-            
+
             // Log successful time check
             await logger.logCommand('timezone time', userId, serverId, `Success - Showed time for ${targetUser.id} (${userData.timezone_identifier}, ${timeInfo.offset})`);
-            
+
         } catch (error) {
             console.error('Error executing timezone time command:', error);
-            
+
             const errorMessage = '❌ An error occurred while retrieving time information.';
-            
+
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: errorMessage, ephemeral: true });
             } else if (interaction.deferred) {
                 await interaction.editReply({ content: errorMessage });
             }
-            
+
             // Log error
             await logger.error(`**Timezone Time Command Error** | **User:** <@${interaction.user.id}> | **Server:** \`${interaction.guildId}\` | **Error:** ${error.message}`);
         }
@@ -444,12 +444,12 @@ module.exports = {
             const date = new Date(timestamp);
             const now = new Date();
             const diffMs = now - date;
-            
+
             const diffSeconds = Math.floor(diffMs / 1000);
             const diffMinutes = Math.floor(diffSeconds / 60);
             const diffHours = Math.floor(diffMinutes / 60);
             const diffDays = Math.floor(diffHours / 24);
-            
+
             if (diffDays > 0) {
                 return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
             } else if (diffHours > 0) {

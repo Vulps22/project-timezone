@@ -1,6 +1,46 @@
 const { DateTime } = require('luxon');
 
 class TimezoneService {
+    constructor() {
+        this.cachedTimezones = [];
+        this.initializeTimezones();
+    }
+
+    /**
+     * Initialize and cache all available timezones on startup
+     */
+    initializeTimezones() {
+        try {
+            console.log('🌍 Initializing timezone cache...');
+            
+            // Use Intl.supportedValuesOf if available (Node 18+)
+            if (typeof Intl.supportedValuesOf === 'function') {
+                const timezones = Intl.supportedValuesOf('timeZone');
+                this.cachedTimezones = timezones
+                    .filter(tz => this.isValidTimezone(tz)) // Double-check validity
+                    .map(tz => ({ name: tz, value: tz }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                
+                console.log(`✅ Cached ${this.cachedTimezones.length} timezones from Intl.supportedValuesOf`);
+            } else {
+                // Fallback to common timezones if Intl.supportedValuesOf is not available
+                console.log('⚠️ Intl.supportedValuesOf not available, using fallback common timezones');
+                this.cachedTimezones = this.getCommonTimezones();
+            }
+        } catch (error) {
+            console.error('❌ Error initializing timezones, falling back to common list:', error);
+            this.cachedTimezones = this.getCommonTimezones();
+        }
+    }
+
+    /**
+     * Get the cached array of all timezones
+     * @returns {Array} Array of timezone objects with name and value
+     */
+    getTimezoneArray() {
+        return this.cachedTimezones;
+    }
+
     /**
      * Validate a timezone identifier
      * @param {string} timezone - Timezone identifier to validate
@@ -145,35 +185,36 @@ class TimezoneService {
     }
 
     /**
-     * Get list of common timezones for autocomplete
+     * Get list of common timezones for autocomplete (fallback)
      * @returns {Array} Array of common timezone objects
      */
     getCommonTimezones() {
         return [
             { name: 'UTC', value: 'UTC' },
-            { name: 'Eastern Time (US)', value: 'America/New_York' },
-            { name: 'Central Time (US)', value: 'America/Chicago' },
-            { name: 'Mountain Time (US)', value: 'America/Denver' },
-            { name: 'Pacific Time (US)', value: 'America/Los_Angeles' },
-            { name: 'Alaska Time (US)', value: 'America/Anchorage' },
-            { name: 'Hawaii Time (US)', value: 'Pacific/Honolulu' },
-            { name: 'London (UK)', value: 'Europe/London' },
-            { name: 'Paris (France)', value: 'Europe/Paris' },
-            { name: 'Berlin (Germany)', value: 'Europe/Berlin' },
-            { name: 'Rome (Italy)', value: 'Europe/Rome' },
-            { name: 'Moscow (Russia)', value: 'Europe/Moscow' },
-            { name: 'Tokyo (Japan)', value: 'Asia/Tokyo' },
-            { name: 'Shanghai (China)', value: 'Asia/Shanghai' },
-            { name: 'Mumbai (India)', value: 'Asia/Kolkata' },
-            { name: 'Sydney (Australia)', value: 'Australia/Sydney' },
-            { name: 'Melbourne (Australia)', value: 'Australia/Melbourne' },
-            { name: 'Auckland (New Zealand)', value: 'Pacific/Auckland' },
-            { name: 'Toronto (Canada)', value: 'America/Toronto' },
-            { name: 'Vancouver (Canada)', value: 'America/Vancouver' },
-            { name: 'Mexico City (Mexico)', value: 'America/Mexico_City' },
-            { name: 'São Paulo (Brazil)', value: 'America/Sao_Paulo' },
-            { name: 'Buenos Aires (Argentina)', value: 'America/Argentina/Buenos_Aires' },
-            { name: 'Dubai (UAE)', value: 'Asia/Dubai' }
+            { name: 'America/New_York', value: 'America/New_York' },
+            { name: 'America/Chicago', value: 'America/Chicago' },
+            { name: 'America/Denver', value: 'America/Denver' },
+            { name: 'America/Los_Angeles', value: 'America/Los_Angeles' },
+            { name: 'America/Anchorage', value: 'America/Anchorage' },
+            { name: 'Pacific/Honolulu', value: 'Pacific/Honolulu' },
+            { name: 'Europe/London', value: 'Europe/London' },
+            { name: 'Europe/Paris', value: 'Europe/Paris' },
+            { name: 'Europe/Berlin', value: 'Europe/Berlin' },
+            { name: 'Europe/Rome', value: 'Europe/Rome' },
+            { name: 'Europe/Moscow', value: 'Europe/Moscow' },
+            { name: 'Asia/Tokyo', value: 'Asia/Tokyo' },
+            { name: 'Asia/Shanghai', value: 'Asia/Shanghai' },
+            { name: 'Asia/Kolkata', value: 'Asia/Kolkata' },
+            { name: 'Asia/Jerusalem', value: 'Asia/Jerusalem' },
+            { name: 'Australia/Sydney', value: 'Australia/Sydney' },
+            { name: 'Australia/Melbourne', value: 'Australia/Melbourne' },
+            { name: 'Pacific/Auckland', value: 'Pacific/Auckland' },
+            { name: 'America/Toronto', value: 'America/Toronto' },
+            { name: 'America/Vancouver', value: 'America/Vancouver' },
+            { name: 'America/Mexico_City', value: 'America/Mexico_City' },
+            { name: 'America/Sao_Paulo', value: 'America/Sao_Paulo' },
+            { name: 'America/Argentina/Buenos_Aires', value: 'America/Argentina/Buenos_Aires' },
+            { name: 'Asia/Dubai', value: 'Asia/Dubai' }
         ];
     }
 
@@ -185,14 +226,14 @@ class TimezoneService {
     searchTimezones(query) {
         console.log(`🔍 TimezoneService.searchTimezones called with query: "${query}"`);
         
-        const common = this.getCommonTimezones();
-        console.log(`📋 Common timezones loaded: ${common.length} items`);
+        const allTimezones = this.getTimezoneArray();
+        console.log(`📋 Total timezones available: ${allTimezones.length} items`);
         
         // Trim the query and check if empty or too short
         const trimmedQuery = query ? query.trim() : '';
         if (!trimmedQuery || trimmedQuery.length < 2) {
-            console.log(`⚡ Query too short, returning first 25 common timezones`);
-            const result = common.slice(0, 25);
+            console.log(`⚡ Query too short, returning first 25 timezones`);
+            const result = allTimezones.slice(0, 25);
             console.log(`📤 Returning ${result.length} timezone options`);
             return result;
         }
@@ -200,11 +241,9 @@ class TimezoneService {
         const lowerQuery = trimmedQuery.toLowerCase();
         console.log(`🔎 Searching for: "${lowerQuery}"`);
         
-        // Filter common timezones by name
-        const matches = common.filter(tz => {
-            const nameMatch = tz.name.toLowerCase().includes(lowerQuery);
-            const valueMatch = tz.value.toLowerCase().includes(lowerQuery);
-            return nameMatch || valueMatch;
+        // Filter all timezones by name (since name === value now)
+        const matches = allTimezones.filter(tz => {
+            return tz.name.toLowerCase().includes(lowerQuery);
         });
         
         console.log(`🎯 Found ${matches.length} matches for "${query}"`);
