@@ -70,8 +70,7 @@ class DSTService {
             console.log('🔍 Checking for DST changes...');
 
             // Get all unique timezones from database
-            const stats = await databaseService.getStats();
-            const timezonesInUse = stats.popularTimezones.map(tz => tz.timezone_identifier);
+            const timezonesInUse = await databaseService.getAllActiveTimezones();
 
             if (timezonesInUse.length === 0) {
                 console.log('📭 No timezones in use, skipping DST check');
