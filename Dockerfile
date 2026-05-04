@@ -15,6 +15,7 @@ COPY . .
 
 # Create database directory (will be mounted as volume)
 RUN mkdir -p /app/database
+RUN chmod 775 /app/database
 
 # Expose port (if needed for health checks or future web interface)
 EXPOSE 3000
