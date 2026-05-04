@@ -23,7 +23,14 @@ EXPOSE 3000
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S discordbot -u 1001
 RUN chown -R discordbot:nodejs /app
-USER discordbot
 
-# Start the bot
+# Install su-exec so the entrypoint can drop privileges after fixing volume ownership
+RUN apk add --no-cache su-exec
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Entrypoint runs as root to fix /app/database ownership (Docker volumes may
+# be mounted with root ownership), then drops to discordbot via su-exec.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["npm", "start"]
