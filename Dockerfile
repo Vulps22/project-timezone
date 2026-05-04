@@ -22,7 +22,7 @@ EXPOSE 3000
 # Set user for security (optional but recommended)
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S discordbot -u 1001
-RUN chown -R discordbot:nodejs /app && chmod 755 /app/database
+RUN chown -R discordbot:nodejs /app && chmod 777 /app/database
 
 USER discordbot
 CMD ["npm", "start"]
