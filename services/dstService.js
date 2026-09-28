@@ -1,6 +1,8 @@
 const { DateTime } = require('luxon');
 const databaseService = require('./databaseService');
 const timezoneService = require('./timezoneService');
+const nicknameService = require('./nicknameService');
+const { clientProvider } = require('./clientProvider');
 const { logger } = require('../utils/logger');
 
 class DSTService {
@@ -64,14 +66,13 @@ class DSTService {
 
     /**
      * Check for DST changes in timezones where it's currently 5am
+     * @param {DateTime} [now] - Moment to check at (injectable for tests/simulation)
      */
-    async checkDSTChanges() {
+    async checkDSTChanges(now = DateTime.now()) {
         try {
             console.log('🔍 Checking for DST changes...');
 
-            // Get all unique timezones from database
-            const stats = await databaseService.getStats();
-            const timezonesInUse = stats.popularTimezones.map(tz => tz.timezone_identifier);
+            const timezonesInUse = await databaseService.getDistinctTimezones();
 
             if (timezonesInUse.length === 0) {
                 console.log('📭 No timezones in use, skipping DST check');
@@ -84,7 +85,7 @@ class DSTService {
 
             for (const timezone of timezonesInUse) {
                 try {
-                    const dstChanged = await this.checkTimezoneForDST(timezone);
+                    const dstChanged = await this.checkTimezoneForDST(timezone, now);
                     if (dstChanged) {
                         timezonesToUpdate.push(timezone);
                     }
@@ -109,12 +110,13 @@ class DSTService {
     /**
      * Check if a specific timezone has DST change and it's currently 5am there
      * @param {string} timezone - Timezone identifier
+     * @param {DateTime} [at] - Moment to check at (injectable for tests/simulation)
      * @returns {boolean} True if DST changed and it's 5am
      */
-    async checkTimezoneForDST(timezone) {
+    async checkTimezoneForDST(timezone, at) {
         try {
-            const now = DateTime.now().setZone(timezone);
-            
+            const now = (at ?? DateTime.now()).setZone(timezone);
+
             // Only check if it's currently 5am in this timezone
             if (now.hour !== 5) {
                 return false;
@@ -201,221 +203,41 @@ class DSTService {
      */
     async updateUserNicknamesForDST(userId, timezone) {
         try {
-            const client = require('../services/clientProvider').clientProvider.getClient();
-
-            // Get all servers where this user has the bot
             const userServers = await databaseService.getUserServers(userId);
-            
+
             if (userServers.length === 0) {
                 return 0;
             }
 
             console.log(`🔄 Updating user ${userId} across ${userServers.length} servers for DST...`);
 
-            // Use broadcastEval to update across all shards
-            const results = await client.shard.broadcastEval(
-                async (client, { userId, userServers, timezone, timezoneServiceCode }) => {
-                    // Import timezone service code into eval context
-                    eval(timezoneServiceCode);
-                    
-                    let localUpdatedCount = 0;
-                    const localResults = [];
+            const client = clientProvider.getClient();
 
-                    for (const serverId of userServers) {
-                        try {
-                            const guild = client.guilds.cache.get(serverId);
-                            if (!guild) continue; // Server not on this shard
+            // Each shard only sees its own guilds, so ask every shard to update what it can.
+            // Without sharding (npm run single) there is just the local client.
+            const shardResults = client.shard
+                ? await client.shard.broadcastEval(
+                    (shardClient, { userId, userServers, timezone }) =>
+                        shardClient.nicknameService.updateAcrossGuilds(shardClient, userId, userServers, timezone),
+                    { context: { userId, userServers, timezone } }
+                )
+                : [await nicknameService.updateAcrossGuilds(client, userId, userServers, timezone)];
 
-                            const member = await guild.members.fetch(userId).catch(() => null);
-                            if (!member) continue;
-
-                            // Skip server owners (Discord limitation)
-                            if (guild.ownerId === userId) {
-                                localResults.push({
-                                    serverId,
-                                    serverName: guild.name,
-                                    status: 'skipped_owner',
-                                    message: 'Server owner - Discord limitation'
-                                });
-                                continue;
-                            }
-
-                            // Skip if bot can't manage this member
-                            if (!member.manageable) {
-                                localResults.push({
-                                    serverId,
-                                    serverName: guild.name,
-                                    status: 'skipped_permissions',
-                                    message: 'Cannot manage member'
-                                });
-                                continue;
-                            }
-
-                            // Generate new nickname with updated timezone
-                            const currentNickname = member.nickname || member.user.username;
-                            
-                            // Remove old timezone and add new one
-                            const cleanNickname = removeTimezoneFromNickname(currentNickname);
-                            const newNickname = formatNicknameWithTimezone(
-                                cleanNickname === member.user.username ? null : cleanNickname,
-                                timezone,
-                                member.user.username
-                            );
-
-                            if (newNickname && newNickname !== currentNickname) {
-                                await member.setNickname(newNickname);
-                                
-                                localResults.push({
-                                    serverId,
-                                    serverName: guild.name,
-                                    status: 'updated',
-                                    oldNickname: currentNickname,
-                                    newNickname: newNickname
-                                });
-                                
-                                localUpdatedCount++;
-                            } else {
-                                localResults.push({
-                                    serverId,
-                                    serverName: guild.name,
-                                    status: 'no_change',
-                                    message: 'Nickname already correct'
-                                });
-                            }
-
-                        } catch (error) {
-                            localResults.push({
-                                serverId,
-                                serverName: 'Unknown',
-                                status: 'error',
-                                message: error.message
-                            });
-                        }
-                    }
-
-                    return {
-                        shardId: client.shard?.ids[0] ?? 0,
-                        updatedCount: localUpdatedCount,
-                        results: localResults
-                    };
-                },
-                {
-                    context: {
-                        userId,
-                        userServers,
-                        timezone,
-                        // Pass timezone service functions as strings to eval context
-                        timezoneServiceCode: `
-                            const { DateTime } = require('luxon');
-                            
-                            // Standalone function to validate timezone
-                            const isValidTimezone = (timezone) => {
-                                try {
-                                    // Reject null/undefined/empty values
-                                    if (!timezone || typeof timezone !== 'string') {
-                                        return false;
-                                    }
-                                    
-                                    // Try to create a DateTime in the specified timezone
-                                    const dt = DateTime.now().setZone(timezone);
-                                    // Check if it's a valid zone
-                                    return dt.isValid && dt.zoneName !== null;
-                                } catch (error) {
-                                    return false;
-                                }
-                            };
-                            
-                            // Standalone function to get current offset
-                            const getCurrentOffset = (timezone) => {
-                                if (!isValidTimezone(timezone)) {
-                                    throw new Error(\`Invalid timezone: \${timezone}\`);
-                                }
-
-                                try {
-                                    const dt = DateTime.now().setZone(timezone);
-                                    const offset = dt.offset; // Offset in minutes
-                                    
-                                    if (offset === 0) {
-                                        return "UTC+0";
-                                    }
-                                    
-                                    const hours = Math.abs(offset / 60);
-                                    const sign = offset > 0 ? '+' : '-';
-                                    
-                                    // Format as whole hours or with .5 for 30-minute offsets
-                                    if (hours % 1 === 0) {
-                                        return \`UTC\${sign}\${Math.floor(hours)}\`;
-                                    } else {
-                                        return \`UTC\${sign}\${hours}\`;
-                                    }
-                                } catch (error) {
-                                    console.error('Error getting current offset:', error);
-                                    throw error;
-                                }
-                            };
-                            
-                            // Standalone function to remove timezone from nickname
-                            const removeTimezoneFromNickname = (nickname) => {
-                                if (!nickname) return '';
-                                return nickname.replace(/\\s*\\(UTC[+-][\\d.]+\\)\$/i, '').trim();
-                            };
-                            
-                            // Standalone function to format nickname with timezone
-                            const formatNicknameWithTimezone = (currentNickname, timezone, username) => {
-                                try {
-                                    const offset = getCurrentOffset(timezone);
-                                    if (!offset) {
-                                        return null;
-                                    }
-                                    
-                                    // Use current nickname or fall back to username
-                                    const baseName = currentNickname || username;
-                                    
-                                    // Remove existing timezone info if present
-                                    const cleanName = removeTimezoneFromNickname(baseName);
-                                    
-                                    // Add new timezone info
-                                    const newNickname = \`\${cleanName} (\${offset})\`;
-                                    
-                                    // Discord nickname limit is 32 characters
-                                    if (newNickname.length > 32) {
-                                        // Truncate the base name to fit
-                                        const maxBaseLength = 32 - offset.length - 3; // 3 for " ()"
-                                        const truncatedBase = cleanName.substring(0, maxBaseLength);
-                                        return \`\${truncatedBase} (\${offset})\`;
-                                    }
-                                    
-                                    return newNickname;
-                                } catch (error) {
-                                    console.error('Error formatting nickname with timezone:', error);
-                                    return null;
-                                }
-                            };
-                        `
-                    }
-                }
-            );
-
-            // Process results from all shards
             let totalUpdatedCount = 0;
-            
-            for (const shardResult of results) {
-                if (shardResult.updatedCount > 0) {
-                    totalUpdatedCount += shardResult.updatedCount;
-                    
-                    // Log successful updates from this shard
-                    console.log(`✅ Shard ${shardResult.shardId}: Updated ${shardResult.updatedCount} servers for user ${userId}`);
-                    
-                    // Log individual nickname updates
-                    for (const result of shardResult.results) {
-                        if (result.status === 'updated') {
-                            console.log(`📝 DST: Updated ${userId} in ${result.serverName}: "${result.oldNickname}" → "${result.newNickname}"`);
-                            await logger.logNicknameUpdate(userId, result.serverId, result.oldNickname, result.newNickname);
-                        } else if (result.status === 'skipped_owner') {
-                            console.log(`👑 DST: Skipped server owner ${userId} in ${result.serverName}`);
-                        } else if (result.status === 'skipped_permissions') {
-                            console.log(`❌ DST: Cannot manage ${userId} in ${result.serverName}`);
-                        }
+
+            for (const shardResult of shardResults) {
+                totalUpdatedCount += shardResult.updatedCount;
+
+                for (const result of shardResult.results) {
+                    if (result.status === 'updated') {
+                        console.log(`📝 DST: Updated ${userId} in ${result.serverName}: "${result.oldNickname}" → "${result.newNickname}"`);
+                        await logger.logNicknameUpdate(userId, result.serverId, result.oldNickname, result.newNickname);
+                    } else if (result.status === 'skipped_owner') {
+                        console.log(`👑 DST: Skipped server owner ${userId} in ${result.serverName}`);
+                    } else if (result.status === 'skipped_permissions') {
+                        console.log(`❌ DST: Cannot manage ${userId} in ${result.serverName}`);
+                    } else if (result.status === 'error') {
+                        console.error(`❌ DST: Failed to update ${userId} in ${result.serverName}: ${result.message}`);
                     }
                 }
             }

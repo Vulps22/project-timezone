@@ -155,6 +155,26 @@ class DatabaseService {
     }
 
     /**
+     * Get every timezone that at least one user has set
+     * @returns {Promise<string[]>} Array of timezone identifiers
+     */
+    async getDistinctTimezones() {
+        return new Promise((resolve, reject) => {
+            const db = database.getDatabase();
+            const sql = 'SELECT DISTINCT timezone_identifier FROM users';
+
+            db.all(sql, [], (err, rows) => {
+                if (err) {
+                    console.error('Error getting distinct timezones:', err);
+                    reject(err);
+                } else {
+                    resolve(rows.map(row => row.timezone_identifier));
+                }
+            });
+        });
+    }
+
+    /**
      * Get statistics about timezone usage
      * @returns {Promise<Object>} Usage statistics
      */

@@ -8,7 +8,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "single": "node bot.js"
+    "single": "node bot.js",
+    "dst:simulate": "node scripts/simulate-dst.js"
   },
   "keywords": [],
   "author": "",

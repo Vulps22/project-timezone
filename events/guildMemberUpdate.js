@@ -2,6 +2,7 @@ const { Events } = require('discord.js');
 const { logger } = require('../utils/logger');
 const databaseService = require('../services/databaseService');
 const timezoneService = require('../services/timezoneService');
+const nicknameService = require('../services/nicknameService');
 
 module.exports = {
     name: Events.GuildMemberUpdate,
@@ -45,11 +46,7 @@ module.exports = {
                 }
                 
                 // Generate new nickname with timezone
-                const newNicknameWithTz = timezoneService.formatNicknameWithTimezone(
-                    newMember.nickname,
-                    userData.timezone_identifier,
-                    newMember.user.username
-                );
+                const newNicknameWithTz = nicknameService.buildNickname(newMember, userData.timezone_identifier);
                 
                 if (!newNicknameWithTz) {
                     console.error(`❌ Failed to generate nickname with timezone for ${newMember.user.tag}`);

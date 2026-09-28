@@ -45,7 +45,7 @@ describe('DSTService', () => {
         jest.spyOn(dstService, 'updateUsersForDSTChanges');
         
         // Mock database service methods to prevent real calls
-        databaseService.getStats.mockResolvedValue({ popularTimezones: [] });
+        databaseService.getDistinctTimezones.mockResolvedValue([]);
         databaseService.getUsersInTimezone.mockResolvedValue([]);
         databaseService.getUserServers.mockResolvedValue([]);
     });
@@ -216,33 +216,23 @@ describe('DSTService', () => {
         });
 
         test('should check all active timezones', async () => {
-            const mockTimezones = [
-                { timezone_identifier: 'America/New_York' },
-                { timezone_identifier: 'Europe/London' }
-            ];
+            const mockTimezones = ['America/New_York', 'Europe/London'];
             
-            databaseService.getStats.mockResolvedValue({
-                popularTimezones: mockTimezones
-            });
+            databaseService.getDistinctTimezones.mockResolvedValue(mockTimezones);
 
             dstService.checkTimezoneForDST.mockResolvedValue(false);
 
             await dstService.checkDSTChanges();
 
-            expect(databaseService.getStats).toHaveBeenCalled();
-            expect(dstService.checkTimezoneForDST).toHaveBeenCalledWith('America/New_York');
-            expect(dstService.checkTimezoneForDST).toHaveBeenCalledWith('Europe/London');
+            expect(databaseService.getDistinctTimezones).toHaveBeenCalled();
+            expect(dstService.checkTimezoneForDST).toHaveBeenCalledWith('America/New_York', expect.anything());
+            expect(dstService.checkTimezoneForDST).toHaveBeenCalledWith('Europe/London', expect.anything());
         });
 
         test('should process DST changes when detected', async () => {
-            const mockTimezones = [
-                { timezone_identifier: 'America/New_York' },
-                { timezone_identifier: 'Europe/London' }
-            ];
+            const mockTimezones = ['America/New_York', 'Europe/London'];
             
-            databaseService.getStats.mockResolvedValue({
-                popularTimezones: mockTimezones
-            });
+            databaseService.getDistinctTimezones.mockResolvedValue(mockTimezones);
 
             dstService.checkTimezoneForDST
                 .mockResolvedValueOnce(true)  // America/New_York has DST change
@@ -256,9 +246,7 @@ describe('DSTService', () => {
         });
 
         test('should handle no timezones gracefully', async () => {
-            databaseService.getStats.mockResolvedValue({
-                popularTimezones: []
-            });
+            databaseService.getDistinctTimezones.mockResolvedValue([]);
 
             await dstService.checkDSTChanges();
 
@@ -266,14 +254,9 @@ describe('DSTService', () => {
         });
 
         test('should handle individual timezone errors', async () => {
-            const mockTimezones = [
-                { timezone_identifier: 'America/New_York' },
-                { timezone_identifier: 'Invalid/Timezone' }
-            ];
+            const mockTimezones = ['America/New_York', 'Invalid/Timezone'];
             
-            databaseService.getStats.mockResolvedValue({
-                popularTimezones: mockTimezones
-            });
+            databaseService.getDistinctTimezones.mockResolvedValue(mockTimezones);
 
             dstService.checkTimezoneForDST
                 .mockResolvedValueOnce(false)
@@ -320,8 +303,8 @@ describe('DSTService', () => {
             jest.useFakeTimers();
             const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
             
-            // Mock getStats to cause an error in checkDSTChanges
-            databaseService.getStats.mockRejectedValue(new Error('Database error'));
+            // Mock the timezone lookup to cause an error in checkDSTChanges
+            databaseService.getDistinctTimezones.mockRejectedValue(new Error('Database error'));
 
             await dstService.start();
             

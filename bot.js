@@ -5,6 +5,7 @@ const CommandHandler = require('./handlers/commandHandler');
 const EventLoader = require('./handlers/eventLoader');
 const dstService = require('./services/dstService');
 const { clientProvider } = require('./services/clientProvider');
+const nicknameService = require('./services/nicknameService');
 
 class TimezoneBot {
     constructor() {
@@ -16,6 +17,9 @@ class TimezoneBot {
                 GatewayIntentBits.DirectMessages
             ]
         });
+
+        // Exposed on the client so broadcastEval can reach it on every shard (see dstService)
+        this.client.nicknameService = nicknameService;
 
         // Load commands
         this.commandHandler = new CommandHandler(this.client);

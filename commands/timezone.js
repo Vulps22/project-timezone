@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const databaseService = require('../services/databaseService');
 const timezoneService = require('../services/timezoneService');
+const nicknameService = require('../services/nicknameService');
 const { logger } = require('../utils/logger');
 
 module.exports = {
@@ -135,11 +136,7 @@ module.exports = {
 
             // Try to update nickname
             const member = interaction.member;
-            const newNickname = timezoneService.formatNicknameWithTimezone(
-                member.nickname,
-                timezone,
-                interaction.user.username
-            );
+            const newNickname = nicknameService.buildNickname(member, timezone);
 
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
             const isServerOwner = interaction.guild.ownerId === interaction.user.id;
@@ -167,6 +164,7 @@ module.exports = {
 
             if (newNickname) {
                 try {
+                    const oldNickname = member.displayName;
                     await member.setNickname(newNickname);
 
                     const embed = new EmbedBuilder()
@@ -183,7 +181,7 @@ module.exports = {
 
                     // Log successful timezone set
                     await logger.logTimezoneSet(userId, serverId, timezone, offset);
-                    await logger.logNicknameUpdate(userId, serverId, member.nickname || interaction.user.username, newNickname);
+                    await logger.logNicknameUpdate(userId, serverId, oldNickname, newNickname);
 
                 } catch (nicknameError) {
                     // Nickname update failed, but timezone was saved
@@ -257,26 +255,19 @@ module.exports = {
 
             // Try to remove timezone from nickname first
             const member = interaction.member;
-            const currentNickname = member.nickname || interaction.user.username;
-            const cleanNickname = timezoneService.removeTimezoneFromNickname(currentNickname);
+            const currentNickname = member.displayName;
 
             let nicknameCleared = false;
             let nicknameError = null;
 
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
             const isServerOwner = interaction.guild.ownerId === interaction.user.id;
+            const cleanNickname = nicknameService.buildClearedNickname(member);
 
-            if (!isServerOwner && cleanNickname !== currentNickname) {
+            if (!isServerOwner && timezoneService.hasTimezoneInfo(member.nickname)) {
                 try {
-                    // Only set nickname if it actually changed and it's not just the username
-                    if (member.nickname && cleanNickname !== interaction.user.username) {
-                        await member.setNickname(cleanNickname);
-                        nicknameCleared = true;
-                    } else if (member.nickname) {
-                        // If clean nickname equals username, reset to no nickname
-                        await member.setNickname(null);
-                        nicknameCleared = true;
-                    }
+                    await member.setNickname(cleanNickname);
+                    nicknameCleared = true;
                 } catch (error) {
                     console.error('Error clearing nickname:', error);
                     nicknameError = error;
@@ -340,7 +331,7 @@ module.exports = {
             await logger.logCommand('timezone clear', userId, serverId, logMessage);
 
             if (nicknameCleared) {
-                await logger.logNicknameUpdate(userId, serverId, currentNickname, cleanNickname);
+                await logger.logNicknameUpdate(userId, serverId, currentNickname, cleanNickname ?? interaction.user.displayName);
             } else if (nicknameError && !isServerOwner) {
                 await logger.logPermissionError(userId, serverId, 'clear timezone from nickname');
             }
