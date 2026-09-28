@@ -126,35 +126,25 @@ async function handleCommand(interaction) {
 }
 
 /**
- * Check if the bot has required permissions in the current guild
+ * Check the bot has the permissions the command declares in `botPermissions`.
+ * Uses appPermissions (resolved for this channel by Discord) so it works even
+ * when the guild isn't cached.
  * @param {ChatInputCommandInteraction} interaction
  * @returns {Object} Permission check result
  */
 async function checkBotPermissions(interaction) {
-    // Skip permission check for DMs
-    if (!interaction.guild) {
+    const command = interaction.client.commands.get(interaction.commandName);
+    const requiredPermissions = command?.botPermissions ?? [];
+
+    if (!interaction.inGuild() || !interaction.appPermissions || requiredPermissions.length === 0) {
         return { hasPermissions: true, missingPermissions: [] };
     }
 
-    const botMember = interaction.guild.members.me;
-    const requiredPermissions = [
-        PermissionsBitField.Flags.ManageNicknames,
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-    ];
-
-    const missingPermissions = [];
-
-    for (const permission of requiredPermissions) {
-
-        if (!botMember.permissions.has(permission)) {
-            missingPermissions.push(permission);
-        }
-    }
+    const missingPermissions = requiredPermissions.filter(permission => !interaction.appPermissions.has(permission));
 
     return {
         hasPermissions: missingPermissions.length === 0,
-        missingPermissions: missingPermissions
+        missingPermissions
     };
 }
 

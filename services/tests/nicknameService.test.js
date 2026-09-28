@@ -1,12 +1,17 @@
 const nicknameService = require('../nicknameService');
 
-function makeMember({ nickname = null, globalName = null, username = 'handle', isOwner = false, manageable = true } = {}) {
+function makeMember({ nickname = null, globalName = null, username = 'handle', isOwner = false, manageable = true, canManageNicknames = true } = {}) {
     return {
         id: 'user1',
         nickname,
         manageable,
         user: { id: 'user1', username, globalName },
-        guild: { id: 'guild1', name: 'Test Guild', ownerId: isOwner ? 'user1' : 'owner' },
+        guild: {
+            id: 'guild1',
+            name: 'Test Guild',
+            ownerId: isOwner ? 'user1' : 'owner',
+            members: { me: { permissions: { has: () => canManageNicknames } } }
+        },
         setNickname: jest.fn(async function (name) { this.nickname = name; })
     };
 }
@@ -71,6 +76,12 @@ describe('NicknameService', () => {
         test('skips server owners', async () => {
             const member = makeMember({ isOwner: true });
             expect((await nicknameService.applyTimezone(member, TZ)).status).toBe('skipped_owner');
+            expect(member.setNickname).not.toHaveBeenCalled();
+        });
+
+        test('skips when the bot lacks Manage Nicknames', async () => {
+            const member = makeMember({ canManageNicknames: false });
+            expect((await nicknameService.applyTimezone(member, TZ)).status).toBe('skipped_permissions');
             expect(member.setNickname).not.toHaveBeenCalled();
         });
 

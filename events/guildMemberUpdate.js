@@ -31,20 +31,12 @@ module.exports = {
                     return; // Already has timezone info
                 }
                 
-                // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
-                const isServerOwner = newMember.guild.ownerId === newMember.user.id;
-                
-                if (isServerOwner) {
-                    console.log(`👑 Cannot modify server owner nickname: ${newMember.user.tag}`);
+                const blockReason = nicknameService.getBlockReason(newMember);
+                if (blockReason) {
+                    console.log(`⏭️ Not reapplying timezone for ${newMember.user.tag}: ${blockReason}`);
                     return;
                 }
-                
-                // Check if bot can manage this member
-                if (!newMember.manageable) {
-                    console.log(`❌ Cannot manage user ${newMember.user.tag} due to permissions/hierarchy`);
-                    return;
-                }
-                
+
                 // Generate new nickname with timezone
                 const newNicknameWithTz = nicknameService.buildNickname(newMember, userData.timezone_identifier);
                 

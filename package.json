@@ -9,7 +9,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "single": "node bot.js",
-    "dst:simulate": "node scripts/simulate-dst.js"
+    "dst:simulate": "node scripts/simulate-dst.js",
+    "purge:users": "node scripts/purge-expired-users.js"
   },
   "keywords": [],
   "author": "",

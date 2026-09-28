@@ -78,6 +78,16 @@ module.exports = {
 
         const subcommand = interaction.options.getSubcommand();
 
+        // set/clear edit the member's nickname, so they need a server the bot is actually in
+        // (not a DM, and not a user-installed app in a server without the bot)
+        if ((subcommand === 'set' || subcommand === 'clear') && !interaction.inCachedGuild()) {
+            await interaction.reply({
+                content: '❌ This command can only be used in a server that I\'m a member of.',
+                flags: [MessageFlags.Ephemeral]
+            });
+            return;
+        }
+
         try {
             if (subcommand === 'set') {
                 await this.handleSetTimezone(interaction);
@@ -119,7 +129,7 @@ module.exports = {
         if (!timezoneService.isValidTimezone(timezone)) {
             await interaction.reply({
                 content: '❌ Invalid timezone. Please use a valid timezone identifier like `America/New_York` or `Europe/London`.',
-                flags: ['Ephemeral']
+                flags: [MessageFlags.Ephemeral]
             });
 
             await logger.logCommand('timezone set', userId, serverId, 'Failed - Invalid timezone');
@@ -154,7 +164,7 @@ module.exports = {
                     )
                     .setFooter({ text: 'Your timezone is saved and will work on other servers where you\'re not the owner.' });
 
-                await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
+                await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
                 // Log timezone set with server owner limitation
                 await logger.logTimezoneSet(userId, serverId, timezone, offset);
@@ -162,7 +172,7 @@ module.exports = {
                 return;
             }
 
-            if (newNickname) {
+            if (newNickname && !nicknameService.getBlockReason(member)) {
                 try {
                     const oldNickname = member.displayName;
                     await member.setNickname(newNickname);
@@ -177,7 +187,7 @@ module.exports = {
                         )
                         .setFooter({ text: 'Your timezone will be updated automatically across all servers with this bot.' });
 
-                    await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
+                    await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
                     // Log successful timezone set
                     await logger.logTimezoneSet(userId, serverId, timezone, offset);
@@ -195,7 +205,7 @@ module.exports = {
                         )
                         .setFooter({ text: 'Your timezone is saved and will work on servers where I can manage nicknames.' });
 
-                    await interaction.reply({ embeds: [embed], flags: ['Ephemeral'] });
+                    await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
                     // Log timezone set with permission error
                     await logger.logTimezoneSet(userId, serverId, timezone, offset);
@@ -209,11 +219,11 @@ module.exports = {
                     .addFields(
                         { name: 'Timezone', value: timezone, inline: true },
                         { name: 'Current Offset', value: offset, inline: true },
-                        { name: 'Issue', value: 'Could not update your nickname. This may be due to permission restrictions or role hierarchy.', inline: false }
+                        { name: 'Issue', value: 'I can\'t change your nickname here. I need the **Manage Nicknames** permission, and my highest role must be above yours.', inline: false }
                     )
                     .setFooter({ text: 'Your timezone is saved and will work on servers where I can manage nicknames.' });
 
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
                 // Log timezone set with permission error
                 await logger.logTimezoneSet(userId, serverId, timezone, offset);
@@ -225,7 +235,7 @@ module.exports = {
 
             await interaction.reply({
                 content: '❌ Failed to save your timezone. Please try again later.',
-                flags: ['Ephemeral']
+                flags: [MessageFlags.Ephemeral]
             });
 
             await logger.logCommand('timezone set', userId, serverId, `Failed - Database error: ${dbError.message}`);
@@ -246,7 +256,7 @@ module.exports = {
             if (!userData) {
                 await interaction.reply({
                     content: '❌ No timezone data found for your account.',
-                    ephemeral: true
+                    flags: [MessageFlags.Ephemeral]
                 });
 
                 await logger.logCommand('timezone clear', userId, serverId, 'Failed - No data found');
@@ -261,10 +271,13 @@ module.exports = {
             let nicknameError = null;
 
             // Check if user is server owner (Discord doesn't allow bots to manage owner nicknames)
-            const isServerOwner = interaction.guild.ownerId === interaction.user.id;
+            const blockReason = nicknameService.getBlockReason(member);
+            const isServerOwner = blockReason === 'skipped_owner';
             const cleanNickname = nicknameService.buildClearedNickname(member);
 
-            if (!isServerOwner && timezoneService.hasTimezoneInfo(member.nickname)) {
+            if (blockReason === 'skipped_permissions' && timezoneService.hasTimezoneInfo(member.nickname)) {
+                nicknameError = new Error('Missing permissions or role hierarchy');
+            } else if (!blockReason && timezoneService.hasTimezoneInfo(member.nickname)) {
                 try {
                     await member.setNickname(cleanNickname);
                     nicknameCleared = true;
@@ -321,7 +334,7 @@ module.exports = {
                     .setFooter({ text: 'This action cannot be undone.' });
             }
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
             // Log successful data clearing
             const logMessage = nicknameCleared
@@ -341,7 +354,7 @@ module.exports = {
 
             await interaction.reply({
                 content: '❌ Failed to clear your data. Please try again later.',
-                ephemeral: true
+                flags: [MessageFlags.Ephemeral]
             });
 
             await logger.logCommand('timezone clear', userId, serverId, `Failed - Database error: ${dbError.message}`);
@@ -366,7 +379,7 @@ module.exports = {
                     ? '❌ You haven\'t set your timezone yet! Use `/timezone set` to get started.'
                     : `❌ ${targetUser.username} hasn't set their timezone yet.`;
 
-                await interaction.reply({ content: message, ephemeral: true });
+                await interaction.reply({ content: message, flags: [MessageFlags.Ephemeral] });
 
                 await logger.logCommand('timezone time', userId, serverId, `Failed - No timezone data for ${targetUser.id}`);
                 return;
@@ -378,7 +391,7 @@ module.exports = {
             if (!timeInfo) {
                 await interaction.reply({
                     content: '❌ Error retrieving time information. Please try again.',
-                    ephemeral: true
+                    flags: [MessageFlags.Ephemeral]
                 });
 
                 await logger.logCommand('timezone time', userId, serverId, `Failed - Invalid timezone: ${userData.timezone_identifier}`);
@@ -404,7 +417,7 @@ module.exports = {
                 })
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
             // Log successful time check
             await logger.logCommand('timezone time', userId, serverId, `Success - Showed time for ${targetUser.id} (${userData.timezone_identifier}, ${timeInfo.offset})`);
@@ -415,7 +428,7 @@ module.exports = {
             const errorMessage = '❌ An error occurred while retrieving time information.';
 
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: errorMessage, ephemeral: true });
+                await interaction.reply({ content: errorMessage, flags: [MessageFlags.Ephemeral] });
             } else if (interaction.deferred) {
                 await interaction.editReply({ content: errorMessage });
             }

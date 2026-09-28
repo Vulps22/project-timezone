@@ -1,3 +1,4 @@
+const { PermissionFlagsBits } = require('discord.js');
 const timezoneService = require('./timezoneService');
 
 /**
@@ -45,6 +46,10 @@ class NicknameService {
      */
     getBlockReason(member) {
         if (member.guild.ownerId === member.id) return 'skipped_owner';
+
+        // `manageable` only checks role hierarchy, not whether the bot has Manage Nicknames
+        const me = member.guild.members?.me;
+        if (me && !me.permissions.has(PermissionFlagsBits.ManageNicknames)) return 'skipped_permissions';
         if (!member.manageable) return 'skipped_permissions';
         return null;
     }

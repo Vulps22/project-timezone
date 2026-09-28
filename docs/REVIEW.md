@@ -8,6 +8,11 @@
 | DST only checked 10 timezones | Timezones came from `getStats()`, which has `LIMIT 10`. | New `databaseService.getDistinctTimezones()`. |
 | DST crashed in `npm run single` | `client.shard.broadcastEval` with no shard manager. | Falls back to the local client when `client.shard` is null. |
 | Custom name replaced by @username | Base name was `member.nickname \|\| user.username`, ignoring Discord global display names. | `nicknameService.getBaseName` uses nickname → `globalName` → username. Used by set, clear, guildMemberUpdate and DST. |
+| `/timezone set` wiped the user's server list | `INSERT OR REPLACE` deletes the row, and `ON DELETE CASCADE` removed every `user_servers` row. Users only ever got DST updates in the last server they ran the command in. | Upsert with `ON CONFLICT DO UPDATE`. |
+| `set`/`clear` crashed in DMs or as a user-installed app | `interaction.guild` / `member` were null. | These commands are refused unless `interaction.inCachedGuild()`. |
+| Permission gate crashed when the bot's member wasn't cached, and blocked `/help` + `/timezone time` over Manage Nicknames | It read `guild.members.me.permissions` and applied one list to every command. | Commands now opt in with `botPermissions`, checked against `interaction.appPermissions`. |
+| Nickname edits attempted without Manage Nicknames | `member.manageable` only checks role hierarchy. | `nicknameService.getBlockReason` also checks the bot's Manage Nicknames permission. Used by set, clear, member update, join and DST. |
+| Bot removal left data behind forever | No `guildDelete` handler. | The server's links are deleted, and users with no servers left get `deletion_date = now + 6 months`. Rejoining any server clears it. `npm run purge:users` (for cron) deletes expired users. |
 | Dead files | `test-*.js` scratch scripts, empty `commands/time.js` / `handlers/eventHandler.js`. | Removed. |
 
 ## Remaining improvements (priority order)
@@ -16,8 +21,11 @@
 The check only fires if the bot is up at exactly 05:00 local on changeover day. A restart or crash at that hour means users keep the wrong offset for six months.
 **Better:** make it an idempotent reconcile. Store `applied_offset` per user; every hour, for each user where `currentOffset(tz) !== applied_offset`, update nicknames and store the new offset. It self-heals and removes the 5am logic entirely.
 
-### 2. Only one server is tracked per `/timezone set`
-`user_servers` gets a row only for the guild the command ran in. Other shared servers are never updated. `guildMemberAdd` has a TODO for this. Apply the saved timezone on join, and on `/timezone set` offer "apply everywhere".
+### 2. Servers the user was already in aren't tracked
+`guildMemberAdd` now links known users and applies their timezone when they join a server. But servers they were *already* in when they ran `/timezone set` elsewhere still aren't linked. Consider an "apply everywhere" option on `/timezone set`. Also consider removing the link on `guildMemberRemove`.
+
+### 2b. Slow replies
+`/timezone set` awaits several cross-shard log broadcasts before it replies. Under load, that can pass Discord's 3-second deadline and fail with "Unknown interaction". Reply first, then log (or `deferReply`).
 
 ### 3. SRP — `commands/timezone.js` does everything (~450 lines)
 It validates, writes to the DB, changes nicknames, builds 8 near-identical embeds and logs. Split into:

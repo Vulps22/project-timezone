@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -78,7 +78,7 @@ module.exports = {
                 try {
                     await interaction.reply({
                         content: '❌ An error occurred while displaying the help information. Please try again.',
-                        ephemeral: true
+                        flags: [MessageFlags.Ephemeral]
                     });
                 } catch (replyError) {
                     console.error('❌ Failed to send help error reply:', replyError);
