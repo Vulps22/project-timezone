@@ -1,133 +1,107 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
+const { AsyncLocalStorage } = require('async_hooks');
+const migrations = require('./migrations');
 
-const DEFAULT_PATH = path.join(__dirname, '../database/timezone.db');
+// Arbitrary constant so only one shard runs migrations at a time
+const MIGRATION_LOCK_ID = 7_462_231;
 
 class Database {
-    constructor(dbPath = process.env.DATABASE_PATH || DEFAULT_PATH) {
-        this.db = null;
-        this.dbPath = dbPath;
-        this.transactionQueue = Promise.resolve();
+    constructor() {
+        this.pool = null;
+        // Carries the transaction's client through async calls, so services can
+        // call run/get/all without passing a client around
+        this.transactionContext = new AsyncLocalStorage();
+    }
+
+    /**
+     * Connection settings come from DATABASE_URL, or the standard PG* variables
+     * (PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGPORT) that `pg` reads itself.
+     */
+    buildPoolConfig() {
+        const config = {
+            max: Number(process.env.DATABASE_POOL_SIZE) || 5,
+        };
+        if (process.env.DATABASE_URL) config.connectionString = process.env.DATABASE_URL;
+        if (process.env.DATABASE_SSL === 'true') {
+            config.ssl = { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+        }
+        return config;
     }
 
     async connect() {
-        if (this.dbPath !== ':memory:') {
-            fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-        }
+        this.pool = new Pool(this.buildPoolConfig());
+        this.pool.on('error', (err) => console.error('Unexpected Postgres pool error:', err.message));
 
-        this.db = await new Promise((resolve, reject) => {
-            const db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
-                if (err) {
-                    console.error('Error opening database:', err.message);
-                    reject(err);
-                } else {
-                    resolve(db);
-                }
-            });
-        });
-        console.log('Connected to SQLite database');
+        await this.pool.query('SELECT 1');
+        console.log('Connected to Postgres');
 
-        // WAL lets the shard processes share the file safely
-        await this.run('PRAGMA journal_mode = WAL;').catch(err => console.warn('Could not enable WAL mode:', err.message));
-        await this.run('PRAGMA foreign_keys = ON;');
-        await this.initializeTables();
+        await this.migrate();
     }
 
-    async initializeTables() {
-        await this.run(`CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            timezone_identifier TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            deletion_date DATETIME
-        )`);
-
-        await this.run(`CREATE TABLE IF NOT EXISTS user_servers (
-            user_id TEXT,
-            server_id TEXT,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (user_id, server_id),
-            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-        )`);
-
-        await this.run('CREATE INDEX IF NOT EXISTS idx_user_servers_server ON user_servers(server_id)');
-
-        // Migrations for databases created before a column existed
-        await this.addColumnIfMissing('users', 'deletion_date', 'DATETIME');
-
-        console.log('All database tables initialized successfully');
-    }
-
-    async addColumnIfMissing(table, column, type) {
-        const columns = await this.all(`PRAGMA table_info(${table})`);
-        if (!columns.some(c => c.name === column)) {
-            await this.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-            console.log(`Added column ${table}.${column}`);
+    async migrate() {
+        const client = await this.pool.connect();
+        try {
+            // Every shard connects at startup; the lock stops them racing each other
+            await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_ID]);
+            for (const sql of migrations) {
+                await client.query(sql);
+            }
+            console.log('Database schema is up to date');
+        } finally {
+            await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_ID]).catch(() => {});
+            client.release();
         }
     }
 
-    /** @returns {Promise<{changes: number, lastID: number}>} */
-    run(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.run(sql, params, function (err) {
-                if (err) reject(err);
-                else resolve({ changes: this.changes, lastID: this.lastID });
-            });
-        });
+    /** The transaction's client when inside `transaction()`, otherwise the pool */
+    get executor() {
+        return this.transactionContext.getStore() ?? this.pool;
     }
 
-    get(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
-        });
+    /** @returns {Promise<{changes: number}>} */
+    async run(sql, params = []) {
+        const result = await this.executor.query(sql, params);
+        return { changes: result.rowCount };
     }
 
-    all(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
-        });
+    async get(sql, params = []) {
+        const result = await this.executor.query(sql, params);
+        return result.rows[0];
+    }
+
+    async all(sql, params = []) {
+        const result = await this.executor.query(sql, params);
+        return result.rows;
     }
 
     /**
      * Run the callback inside a transaction, rolling back if it throws.
-     * Transactions are queued because they all share one connection and SQLite
-     * can't nest them.
      * @param {() => Promise<T>} work
      * @returns {Promise<T>}
      * @template T
      */
-    transaction(work) {
-        const result = this.transactionQueue.then(() => this.runTransaction(work));
-        this.transactionQueue = result.catch(() => {});
-        return result;
-    }
+    async transaction(work) {
+        if (this.transactionContext.getStore()) return work(); // already in one
 
-    async runTransaction(work) {
-        await this.run('BEGIN IMMEDIATE');
+        const client = await this.pool.connect();
         try {
-            const result = await work();
-            await this.run('COMMIT');
+            await client.query('BEGIN');
+            const result = await this.transactionContext.run(client, work);
+            await client.query('COMMIT');
             return result;
         } catch (error) {
-            await this.run('ROLLBACK').catch(() => {});
+            await client.query('ROLLBACK').catch(() => {});
             throw error;
+        } finally {
+            client.release();
         }
     }
 
     async close() {
-        if (!this.db) return;
-        await new Promise((resolve) => {
-            this.db.close((err) => {
-                if (err) console.error('Error closing database:', err.message);
-                else console.log('Database connection closed');
-                resolve();
-            });
-        });
-        this.db = null;
-    }
-
-    getDatabase() {
-        return this.db;
+        if (!this.pool) return;
+        await this.pool.end();
+        this.pool = null;
+        console.log('Database connection closed');
     }
 }
 

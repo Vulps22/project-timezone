@@ -3,6 +3,8 @@ services:
   bot:
     image: vulps23/project-timezone:latest
     container_name: timey-zoney-bot-container
+    # Only needed for the one-off SQLite -> Postgres migration (npm run db:migrate-sqlite).
+    # Remove this mount and the volume below once production has been migrated.
     volumes:
       - timezone-data:/app/database
     env_file:

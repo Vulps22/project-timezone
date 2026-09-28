@@ -1,11 +1,17 @@
-process.env.DATABASE_PATH = ':memory:';
+/**
+ * Runs against a real Postgres database. Skipped unless TEST_DATABASE_URL is set, e.g.
+ *   TEST_DATABASE_URL=postgres://postgres@localhost:5432/timezone_test npm test
+ * The tables in that database are emptied between tests, so never point it at production.
+ */
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+if (TEST_DATABASE_URL) process.env.DATABASE_URL = TEST_DATABASE_URL;
 
 const database = require('../../config/database');
 const databaseService = require('../databaseService');
 
-const deletionDateOf = async (userId) => (await database.get('SELECT deletion_date FROM users WHERE user_id = ?', [userId]))?.deletion_date;
+const deletionDateOf = async (userId) => (await database.get('SELECT deletion_date FROM users WHERE user_id = $1', [userId]))?.deletion_date;
 
-describe('DatabaseService (in-memory SQLite)', () => {
+(TEST_DATABASE_URL ? describe : describe.skip)('DatabaseService (Postgres)', () => {
     beforeAll(async () => {
         jest.spyOn(console, 'log').mockImplementation();
         await database.connect();
@@ -17,8 +23,7 @@ describe('DatabaseService (in-memory SQLite)', () => {
 
     beforeEach(async () => {
         jest.spyOn(console, 'log').mockImplementation();
-        await database.run('DELETE FROM user_servers');
-        await database.run('DELETE FROM users');
+        await database.run('TRUNCATE user_servers, users');
     });
 
     test('changing timezone keeps the user\'s server links', async () => {
@@ -52,7 +57,7 @@ describe('DatabaseService (in-memory SQLite)', () => {
             const result = await databaseService.removeServer('s1');
 
             expect(result).toEqual({ linksRemoved: 1, usersScheduled: 1 });
-            const days = (new Date(`${await deletionDateOf('u1')}Z`) - Date.now()) / 86400000;
+            const days = ((await deletionDateOf('u1')) - Date.now()) / 86400000;
             expect(days).toBeGreaterThan(180);
             expect(days).toBeLessThan(185);
         });
@@ -84,8 +89,8 @@ describe('DatabaseService (in-memory SQLite)', () => {
                 await databaseService.setUserTimezone(id, 'Europe/London');
                 await databaseService.addUserToServer(id, 's1');
             }
-            await database.run("UPDATE users SET deletion_date = datetime('now', '-1 day') WHERE user_id = 'expired'");
-            await database.run("UPDATE users SET deletion_date = datetime('now', '+1 day') WHERE user_id = 'pending'");
+            await database.run("UPDATE users SET deletion_date = now() - interval '1 day' WHERE user_id = 'expired'");
+            await database.run("UPDATE users SET deletion_date = now() + interval '1 day' WHERE user_id = 'pending'");
 
             expect(await databaseService.purgeExpiredUsers()).toBe(1);
 
@@ -94,6 +99,26 @@ describe('DatabaseService (in-memory SQLite)', () => {
             expect(await databaseService.getUserTimezone('pending')).not.toBeNull();
             expect(await databaseService.getUserTimezone('active')).not.toBeNull();
         });
+    });
+
+    test('a failed transaction rolls back', async () => {
+        await databaseService.setUserTimezone('u1', 'Europe/London');
+        await expect(database.transaction(async () => {
+            await database.run('DELETE FROM users WHERE user_id = $1', ['u1']);
+            throw new Error('boom');
+        })).rejects.toThrow('boom');
+        expect(await databaseService.getUserTimezone('u1')).not.toBeNull();
+    });
+
+    test('getStats returns numbers, not bigint strings', async () => {
+        await databaseService.setUserTimezone('u1', 'Europe/London');
+        const stats = await databaseService.getStats();
+        expect(stats.totalUsers).toBe(1);
+        expect(stats.popularTimezones[0]).toEqual({ timezone_identifier: 'Europe/London', count: 1 });
+    });
+
+    test('migrations are safe to run again', async () => {
+        await expect(database.migrate()).resolves.toBeUndefined();
     });
 
     test('concurrent transactions do not collide', async () => {

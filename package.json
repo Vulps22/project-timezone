@@ -10,7 +10,8 @@
     "test:coverage": "jest --coverage",
     "single": "node bot.js",
     "dst:simulate": "node scripts/simulate-dst.js",
-    "purge:users": "node scripts/purge-expired-users.js"
+    "purge:users": "node scripts/purge-expired-users.js",
+    "db:migrate-sqlite": "node scripts/migrate-sqlite-to-postgres.js"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
     "discord.js": "^14.21.0",
     "dotenv": "^17.2.0",
     "luxon": "^3.7.1",
+    "pg": "^8.23.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 const database = require('../config/database');
 
 // How long a user's data is kept after the bot leaves their last known server
-const RETENTION_PERIOD = '+6 months';
+const RETENTION_PERIOD = '6 months';
 
 class DatabaseService {
     /**
@@ -10,21 +10,20 @@ class DatabaseService {
      * @returns {Promise<Object|null>} User timezone data or null if not found
      */
     async getUserTimezone(userId) {
-        const row = await database.get('SELECT * FROM users WHERE user_id = ?', [userId]);
+        const row = await database.get('SELECT * FROM users WHERE user_id = $1', [userId]);
         return row || null;
     }
 
     /**
      * Set or update user's timezone.
-     * Uses an upsert rather than INSERT OR REPLACE: REPLACE deletes the old row,
-     * which cascades and wipes every user_servers row for the user.
+     * Must stay an upsert: delete-and-reinsert would cascade and wipe the user's user_servers rows.
      * @param {string} userId - Discord user ID
      * @param {string} timezoneIdentifier - Timezone identifier (e.g., 'America/New_York')
      * @returns {Promise<boolean>} Success status
      */
     async setUserTimezone(userId, timezoneIdentifier) {
         await database.run(
-            `INSERT INTO users (user_id, timezone_identifier) VALUES (?, ?)
+            `INSERT INTO users (user_id, timezone_identifier) VALUES ($1, $2)
              ON CONFLICT(user_id) DO UPDATE SET
                 timezone_identifier = excluded.timezone_identifier,
                 deletion_date = NULL`,
@@ -40,8 +39,8 @@ class DatabaseService {
      */
     async deleteUser(userId) {
         await database.transaction(async () => {
-            await database.run('DELETE FROM user_servers WHERE user_id = ?', [userId]);
-            await database.run('DELETE FROM users WHERE user_id = ?', [userId]);
+            await database.run('DELETE FROM user_servers WHERE user_id = $1', [userId]);
+            await database.run('DELETE FROM users WHERE user_id = $1', [userId]);
         });
         return true;
     }
@@ -55,10 +54,10 @@ class DatabaseService {
     async addUserToServer(userId, serverId) {
         await database.transaction(async () => {
             await database.run(
-                'INSERT OR IGNORE INTO user_servers (user_id, server_id) VALUES (?, ?)',
+                'INSERT INTO user_servers (user_id, server_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
                 [userId, serverId]
             );
-            await database.run('UPDATE users SET deletion_date = NULL WHERE user_id = ?', [userId]);
+            await database.run('UPDATE users SET deletion_date = NULL WHERE user_id = $1', [userId]);
         });
         return true;
     }
@@ -69,7 +68,7 @@ class DatabaseService {
      * @returns {Promise<Array>} Array of server IDs
      */
     async getUserServers(userId) {
-        const rows = await database.all('SELECT server_id FROM user_servers WHERE user_id = ?', [userId]);
+        const rows = await database.all('SELECT server_id FROM user_servers WHERE user_id = $1', [userId]);
         return rows.map(row => row.server_id);
     }
 
@@ -81,22 +80,20 @@ class DatabaseService {
      */
     async removeServer(serverId) {
         return database.transaction(async () => {
-            const affected = await database.all('SELECT user_id FROM user_servers WHERE server_id = ?', [serverId]);
-            const { changes: linksRemoved } = await database.run('DELETE FROM user_servers WHERE server_id = ?', [serverId]);
+            const removed = await database.all(
+                'DELETE FROM user_servers WHERE server_id = $1 RETURNING user_id',
+                [serverId]
+            );
 
-            let usersScheduled = 0;
-            for (const { user_id: userId } of affected) {
-                const { changes } = await database.run(
-                    `UPDATE users SET deletion_date = datetime('now', ?)
-                     WHERE user_id = ?
-                       AND deletion_date IS NULL
-                       AND NOT EXISTS (SELECT 1 FROM user_servers WHERE user_id = users.user_id)`,
-                    [RETENTION_PERIOD, userId]
-                );
-                usersScheduled += changes;
-            }
+            const { changes: usersScheduled } = await database.run(
+                `UPDATE users SET deletion_date = now() + $2::interval
+                 WHERE user_id = ANY($1)
+                   AND deletion_date IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM user_servers WHERE user_servers.user_id = users.user_id)`,
+                [removed.map(r => r.user_id), RETENTION_PERIOD]
+            );
 
-            return { linksRemoved, usersScheduled };
+            return { linksRemoved: removed.length, usersScheduled };
         });
     }
 
@@ -105,16 +102,9 @@ class DatabaseService {
      * @returns {Promise<number>} Number of users deleted
      */
     async purgeExpiredUsers() {
-        return database.transaction(async () => {
-            await database.run(
-                `DELETE FROM user_servers WHERE user_id IN
-                    (SELECT user_id FROM users WHERE deletion_date IS NOT NULL AND deletion_date < datetime('now'))`
-            );
-            const { changes } = await database.run(
-                "DELETE FROM users WHERE deletion_date IS NOT NULL AND deletion_date < datetime('now')"
-            );
-            return changes;
-        });
+        // user_servers rows go with them via ON DELETE CASCADE
+        const { changes } = await database.run('DELETE FROM users WHERE deletion_date < now()');
+        return changes;
     }
 
     /**
@@ -123,7 +113,7 @@ class DatabaseService {
      * @returns {Promise<Array>} Array of user IDs
      */
     async getUsersInTimezone(timezoneIdentifier) {
-        const rows = await database.all('SELECT user_id FROM users WHERE timezone_identifier = ?', [timezoneIdentifier]);
+        const rows = await database.all('SELECT user_id FROM users WHERE timezone_identifier = $1', [timezoneIdentifier]);
         return rows.map(row => row.user_id);
     }
 
@@ -153,10 +143,11 @@ class DatabaseService {
             `)
         ]);
 
+        // COUNT(*) is a bigint, which pg returns as a string
         return {
-            totalUsers: users.count,
-            totalConnections: connections.count,
-            popularTimezones
+            totalUsers: Number(users.count),
+            totalConnections: Number(connections.count),
+            popularTimezones: popularTimezones.map(row => ({ ...row, count: Number(row.count) }))
         };
     }
 }

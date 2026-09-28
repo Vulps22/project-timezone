@@ -36,8 +36,8 @@ It validates, writes to the DB, changes nicknames, builds 8 near-identical embed
 ### 4. DIP — everything `require`s singletons
 Services import each other and `config/database` directly, which is why tests need `jest.mock` everywhere. Export classes, construct them once in `bot.js` (composition root) and pass dependencies in.
 
-### 5. DRY — database layer
-Every method repeats the `new Promise((resolve, reject) => db.x(..., cb))` wrapper. Add `run/get/all` helpers (or use `better-sqlite3`, which is sync and faster). Replace the `INSERT OR REPLACE ... CASE WHEN EXISTS` subqueries with `INSERT ... ON CONFLICT(user_id) DO UPDATE`. `dst_schedule` is never used. Table creation runs in parallel with no migrations.
+### 5. Database layer — done
+Moved to Postgres (`pg`). Migrations are applied on startup under an advisory lock, and `run/get/all/transaction` helpers remove the callback boilerplate. The unused `dst_schedule` table has been dropped. After production has been migrated, delete `scripts/migrate-sqlite-to-postgres.js`, the `sqlite3` dependency and the Docker volume.
 
 ### 6. DRY — misc
 - Three ways of sending ephemeral replies (`ephemeral: true`, `flags: ['Ephemeral']`, `MessageFlags.Ephemeral`). `ephemeral` is deprecated; use `MessageFlags.Ephemeral` everywhere.

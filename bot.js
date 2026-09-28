@@ -36,7 +36,7 @@ class TimezoneBot {
             // Set client in provider for cross-module access
             clientProvider.setClient(this.client);
             
-            // Connect to database (each shard shares the same SQLite file)
+            // Connect to Postgres (each shard has its own connection pool)
             await database.connect();
             
             // Login to Discord - events will handle the rest

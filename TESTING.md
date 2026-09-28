@@ -1,7 +1,8 @@
 # Testing
 
 ```bash
-npm test                 # all Jest tests
+npm test                 # all Jest tests (DB tests skipped)
+TEST_DATABASE_URL=postgres://postgres@localhost:5432/timezone_test npm test   # include DB tests
 npm run test:coverage
 ```
 
@@ -9,6 +10,7 @@ npm run test:coverage
 |---|---|
 | `services/tests/timezoneService.test.js` | Validation, offsets, nickname suffix formatting |
 | `services/tests/nicknameService.test.js` | Base-name choice (nickname / global display name / username), owner & permission skips |
+| `services/tests/databaseService.test.js` | Real Postgres: upserts, server removal, scheduled deletion, purge, transactions. **Skipped unless `TEST_DATABASE_URL` is set** (that database gets wiped) |
 | `services/tests/dstService.test.js` | Scheduler lifecycle and detection logic (mocked) |
 | `services/tests/dstSimulation.test.js` | **End-to-end DST switch**: real Luxon with a frozen clock and fake multi-shard Discord guilds |
 

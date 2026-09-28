@@ -37,21 +37,11 @@ docker-compose logs -f timezone-bot  # Follow logs
 ```
 
 ### Database Management
+The bot uses an external Postgres database set by `DATABASE_URL`. Back it up with your provider's tools, or `pg_dump "$DATABASE_URL" > backup.sql`.
+
+Migrating the old SQLite volume (one-off, safe to re-run):
 ```bash
-# List volumes
-docker volume ls
-
-# Inspect the database volume
-docker volume inspect project-timezone_timezone-data
-
-# Backup database
-docker run --rm -v project-timezone_timezone-data:/data -v $(pwd):/backup alpine tar czf /backup/database-backup-$(date +%Y%m%d-%H%M%S).tar.gz -C /data .
-
-# Restore database
-docker run --rm -v project-timezone_timezone-data:/data -v $(pwd):/backup alpine tar xzf /backup/database-backup.tar.gz -C /data
-
-# Access database directly (for debugging)
-docker run --rm -it -v project-timezone_timezone-data:/data alpine sh
+docker compose run --rm bot npm run db:migrate-sqlite
 ```
 
 ### Maintenance
@@ -68,20 +58,15 @@ docker stats timey-zoney-bot
 docker exec -it timey-zoney-bot sh
 ```
 
-## Volume Persistence
-
-The database is stored in a Docker named volume `timezone-data` which:
-- ✅ Persists across container restarts
-- ✅ Survives container deletion  
-- ✅ Maintains data during updates
-- ✅ Can be backed up and restored
-- ✅ Is managed by Docker for optimal performance
-
 ## Environment Variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DISCORD_TOKEN` | Your Discord bot token | Yes |
+| `DATABASE_URL` | Postgres connection URL (or use `PGHOST`/`PGUSER`/...) | Yes |
+| `DATABASE_POOL_SIZE` | Connections per shard (default 5) | No |
+| `DATABASE_SSL` | `true` for providers that require TLS | No |
+| `DATABASE_SSL_REJECT_UNAUTHORIZED` | `false` to allow self-signed certificates | No |
 | `DISCORD_LOG_CHANNEL` | Channel ID for general logs | No |
 | `DISCORD_ERROR_CHANNEL` | Channel ID for error logs | No |
 | `DISCORD_LOGGER_WEBHOOK` | Webhook URL for fallback logging | No |
@@ -103,11 +88,8 @@ docker-compose logs timezone-bot
 
 ### Database issues:
 ```bash
-# Check if volume exists
-docker volume ls | grep timezone-data
-
-# Check volume mount
-docker exec -it timey-zoney-bot ls -la /app/database
+# Check the bot can reach Postgres
+docker compose run --rm bot node -e "require('./config/database').connect().then(() => process.exit(0))"
 ```
 
 ### Memory issues:

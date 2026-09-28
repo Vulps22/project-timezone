@@ -60,14 +60,19 @@ npm start
 
 ## Technical Implementation
 
-### Database Design (SQLite)
-- **users table**: `user_id`, `timezone_identifier`, `created_at`
+### Database Design (Postgres)
+Schema lives in `config/migrations.js` and is applied automatically on startup.
+- **users table**: `user_id`, `timezone_identifier`, `created_at`, `deletion_date`
 - **user_servers table**: `user_id`, `server_id`, `joined_at`
-- **dst_schedule table**: `timezone`, `next_change_date`, `next_offset`
+
+Configure with `DATABASE_URL` (see `.env.example`). To move existing SQLite data across:
+```bash
+SQLITE_PATH=./database/timezone.db npm run db:migrate-sqlite
+```
 
 ### Key Libraries
 - **discord.js** - Discord API interaction
-- **sqlite3** - Local database storage
+- **pg** - Postgres client
 - **luxon** or **moment-timezone** - Timezone and DST calculations
 
 ### DST Update Strategy
@@ -85,7 +90,7 @@ npm start
 ## Dependencies
 
 - [discord.js](https://discord.js.org/) - Discord API library
-- [sqlite3](https://www.npmjs.com/package/sqlite3) - SQLite database driver
+- [pg](https://node-postgres.com/) - Postgres client
 - [luxon](https://moment.github.io/luxon/) - Timezone handling library
 
 ## Bot Permissions Required
